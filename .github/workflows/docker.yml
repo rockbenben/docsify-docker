@@ -15,20 +15,21 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "18"
+          node-version: "20"
 
       - name: Check Docsify-cli latest version
         id: docsify-version
         run: |
           echo "DOCSIFY_CLI_VERSION=$(npm view docsify-cli version)" >> $GITHUB_ENV
-          echo "::set-output name=docsify_cli_version::$(npm view docsify-cli version)"
+          echo "docsify_cli_version=$(npm view docsify-cli version)" >> $GITHUB_ENV
+          echo "docsify_cli_version=$(npm view docsify-cli version)" >> $GITHUB_STEP_SUMMARY
 
       - name: Pull Docsify-cli version from last build
         id: last-build-version
-        uses: actions/github-script@v6
+        uses: actions/github-script@v7
         with:
           script: |
-            const { data: releases } = await github.repos.listReleases({
+            const { data: releases } = await github.rest.repos.listReleases({
               owner: context.repo.owner,
               repo: context.repo.repo,
             });
