@@ -69,14 +69,3 @@ jobs:
           tags: rockben/docsify-server:${{ steps.docsify-version.outputs.docsify_cli_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Create a new release
-        if: steps.compare-versions.outputs.version_updated == 'true'
-        uses: actions/create-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.docsify-version.outputs.docsify_cli_version }}
-          release_name: Release ${{ steps.docsify-version.outputs.docsify_cli_version }}
-          draft: false
-          prerelease: false
