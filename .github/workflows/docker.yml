@@ -1,0 +1,82 @@
+name: Build and Push Docsify Docker Image
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # UTC 00:00 every day
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: Check Docsify-cli latest version
+        id: docsify-version
+        run: |
+          echo "DOCSIFY_CLI_VERSION=$(npm view docsify-cli version)" >> $GITHUB_ENV
+          echo "::set-output name=docsify_cli_version::$(npm view docsify-cli version)"
+
+      - name: Pull Docsify-cli version from last build
+        id: last-build-version
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: releases } = await github.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const latestRelease = releases[0];
+            const version = latestRelease ? latestRelease.tag_name : '0.0.0';
+            console.log(`Last docsify-cli version: ${version}`);
+            return version;
+
+      - name: Compare Docsify-cli versions
+        id: compare-versions
+        run: |
+          if [ "${{ steps.docsify-version.outputs.docsify_cli_version }}" == "${{ steps.last-build-version.outputs.result }}" ]; then
+            echo "No new version of docsify-cli. Exiting..."
+            echo "::set-output name=version_updated::false"
+          else
+            echo "New version of docsify-cli found: ${{ steps.docsify-version.outputs.docsify_cli_version }}"
+            echo "::set-output name=version_updated::true"
+          fi
+
+      - name: Log in to Docker Hub
+        if: steps.compare-versions.outputs.version_updated == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        if: steps.compare-versions.outputs.version_updated == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        if: steps.compare-versions.outputs.version_updated == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: rockben/docsify-server:${{ steps.docsify-version.outputs.docsify_cli_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create a new release
+        if: steps.compare-versions.outputs.version_updated == 'true'
+        uses: actions/create-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.docsify-version.outputs.docsify_cli_version }}
+          release_name: Release ${{ steps.docsify-version.outputs.docsify_cli_version }}
+          draft: false
+          prerelease: false

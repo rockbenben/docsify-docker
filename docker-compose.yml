@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  docsify:
+    container_name: docsify-server
+    image: rockben/docsify-server
+    volumes:
+      - ./docs:/docs
+    ports:
+      - "8080:3000"
+    restart: unless-stopped
