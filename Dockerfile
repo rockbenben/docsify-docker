@@ -1,4 +1,4 @@
-FROM node:latest
+FROM node:alpine
 LABEL description="A Dockerfile for build Docsify."
 WORKDIR /docs
 RUN npm install -g docsify-cli@latest
