@@ -15,38 +15,42 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "lts/*"
 
       - name: Get the current Docsify-cli version
-        id: get-current-version
         run: |
-          echo "DOCSIFY_CLI_VERSION=$(npm view docsify-cli version)" >> $GITHUB_ENV
-          echo "docsify_cli_version=$(npm view docsify-cli version)" >> $GITHUB_ENV
+          DOCSIFY_CLI_VERSION=$(npm view docsify-cli version)
+          echo "docsify_cli_version=$DOCSIFY_CLI_VERSION" >> $GITHUB_ENV
 
-      - name: Pull Docsify-cli version from last build
-        id: last-build-version
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-            const latestRelease = releases[0];
-            const version = latestRelease ? latestRelease.tag_name : '0.0.0';
-            console.log(`Last docsify-cli version: ${version}`);
-            return version;
-
-      - name: Compare Docsify-cli versions
-        id: compare-versions
+      - name: Pull Docsify-cli version from last Docker tag
         run: |
-          if [ "${{ env.docsify_cli_version }}" == "${{ steps.last-build-version.outputs.result }}" ]; then
-            echo "No new version of docsify-cli. Exiting..."
-            echo "version_updated=false" >> $GITHUB_ENV
+          LAST_VERSION=$(curl -s "https://hub.docker.com/v2/repositories/rockben/docsify-server/tags?page_size=2" | jq -r '.results[1].name')
+          echo "Last docsify-cli version: $LAST_VERSION"
+          echo "last_version=$LAST_VERSION" >> $GITHUB_ENV
+
+      - name: Compare Docsify-cli versions and set action flag
+        run: |
+          if [ "$DOCSIFY_CLI_VERSION" == "$LAST_VERSION" ]; then
+            echo "No new version of docsify-cli. Checking workflow trigger..."
+            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              echo "Manual trigger detected. Proceeding with Docker image push..."
+              echo "version_updated=true" >> $GITHUB_ENV
+            else
+              echo "No manual trigger and no new version. Exiting..."
+              echo "version_updated=false" >> $GITHUB_ENV
+            fi
           else
-            echo "New version of docsify-cli found: ${{ env.docsify_cli_version }}"
+            echo "New version of docsify-cli found: $DOCSIFY_CLI_VERSION"
             echo "version_updated=true" >> $GITHUB_ENV
           fi
+
+      - name: Set up QEMU
+        if: ${{ env.version_updated }} == 'true'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: ${{ env.version_updated }} == 'true'
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
         if: ${{ env.version_updated }} == 'true'
@@ -54,10 +58,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Set up Docker Buildx
-        if: ${{ env.version_updated }} == 'true'
-        uses: docker/setup-buildx-action@v3
 
       - name: Build and push Docker image
         if: ${{ env.version_updated }} == 'true'
@@ -67,7 +67,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            rockben/docsify-server:${{ env.docsify_cli_version }}
+            rockben/docsify-server:$DOCSIFY_CLI_VERSION
             rockben/docsify-server:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
