@@ -67,7 +67,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            rockben/docsify-server:$DOCSIFY_CLI_VERSION
+            rockben/docsify-server:${{ env.docsify_cli_version }}
             rockben/docsify-server:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
