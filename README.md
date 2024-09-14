@@ -55,3 +55,15 @@ Before you start, ensure you have Docker installed on your machine.
 4. **Access Your Site**:
 
    Your documentation site is now available at `http://localhost:8080`.
+
+## docker hub
+
+```shell
+docker run -d -p 8080:3000 --name docsify-server rockben/docsify-server:latest
+```
+
+## ghcr.io
+
+```shell
+docker run -d -p 8080:3000 --name docsify-server ghcr.io/rockbenben/docsify-server:latest
+```
