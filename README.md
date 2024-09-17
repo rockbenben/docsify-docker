@@ -38,7 +38,7 @@ Before you start, ensure you have Docker installed on your machine.
    services:
      docsify:
        container_name: docsify-server
-       image: rockben/docsify-server
+       image: ghcr.io/rockbenben/docsify-server:latest
        volumes:
          - ./docs:/docs
        ports:
@@ -48,22 +48,20 @@ Before you start, ensure you have Docker installed on your machine.
 
    Run the container using:
 
-   ```sh
+   ```shell
    docker-compose up -d
+   ```
+
+   Or quickly deploy with the following command:
+
+   ```shell
+   # ghcr.io
+   docker run -d -p 8080:3000 --name docsify-server ghcr.io/rockbenben/docsify-server:latest
+
+   # docker hub
+   docker run -d -p 8080:3000 --name docsify-server rockben/docsify-server:latest
    ```
 
 4. **Access Your Site**:
 
    Your documentation site is now available at `http://localhost:8080`.
-
-## docker hub
-
-```shell
-docker run -d -p 8080:3000 --name docsify-server rockben/docsify-server:latest
-```
-
-## ghcr.io
-
-```shell
-docker run -d -p 8080:3000 --name docsify-server ghcr.io/rockbenben/docsify-server:latest
-```
