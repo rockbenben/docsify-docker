@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must stay LF so the container's /bin/sh can run them
+# even when the repo is cloned on Windows.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
