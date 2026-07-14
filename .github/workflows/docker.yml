@@ -1,85 +1,113 @@
 name: 🐳 Build and Push Docker Image
 
 on:
+  # 改动镜像构建输入时立即重新发布（自动化盯得住本仓库自身的变化）
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - docker-entrypoint.sh
+      - "template/**"
+      - .dockerignore
+      - .github/workflows/docker.yml
   schedule:
     - cron: "0 3 15 * *" # At 03:00 on the 15th day of every month (UTC)
   workflow_dispatch:
 
+# 同一 ref 的发布不互相取消，避免并发推送把标签写乱
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+# 用默认 GITHUB_TOKEN 推送 GHCR，无需额外 PAT
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: docsify-server
+
 jobs:
-  push_to_registry:
-    name: Push Docker image to Docker Hub
+  # 第一步：只判断是否需要构建，避免无新版本时白跑重活
+  check:
+    name: Check for new docsify-cli version
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: 🔍 Compare npm latest vs last published tag
+        id: check
+        run: |
+          LATEST=$(npm view docsify-cli version)
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+
+          # 取最近已发布的非 latest 标签作为上次构建的版本。
+          # || true 兜底：首次构建 / 仓库 404 / 只有 latest 标签时置空，
+          # 空值与 $LATEST 不等 → 触发构建（正是首次该有的行为），不让 pipefail 挂掉整步。
+          PUBLISHED=$(curl -fsSL "https://hub.docker.com/v2/repositories/${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}/tags?page_size=100" \
+            | jq -r '.results[].name' | grep -vx latest | head -n1 || true)
+          echo "npm latest: $LATEST | last published: ${PUBLISHED:-<none>}"
+
+          # 定时任务（schedule）只在 docsify-cli 有新版本时构建；
+          # push / workflow_dispatch 一律构建（发布本仓库自身的改动）。
+          if [ "$LATEST" != "$PUBLISHED" ] || [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Scheduled run with no new docsify-cli version — skipping build."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 第二步：仅在需要时构建并推送
+  build:
+    name: Push Docker image to Docker Hub and GHCR
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: 🚚 Check out the repo
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "lts/*"
-
-      - name: Get the current Docsify-cli version
-        run: |
-          DOCSIFY_CLI_VERSION=$(npm view docsify-cli version)
-          echo "docsify_cli_version=$DOCSIFY_CLI_VERSION" >> $GITHUB_ENV
-
-      - name: Pull Docsify-cli version from last Docker tag
-        run: |
-          LAST_VERSION=$(curl -s "https://hub.docker.com/v2/repositories/rockben/docsify-server/tags?page_size=2" | jq -r '.results[1].name')
-          echo "Last docsify-cli version: $LAST_VERSION"
-          echo "last_version=$LAST_VERSION" >> $GITHUB_ENV
-
-      - name: Compare Docsify-cli versions and set action flag
-        run: |
-          if [ "$DOCSIFY_CLI_VERSION" == "$LAST_VERSION" ]; then
-            echo "No new version of docsify-cli. Checking workflow trigger..."
-            if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-              echo "Manual trigger detected. Proceeding with Docker image push..."
-              echo "version_updated=true" >> $GITHUB_ENV
-            else
-              echo "No manual trigger and no new version. Exiting..."
-              echo "version_updated=false" >> $GITHUB_ENV
-              exit 0
-            fi
-          else
-            echo "New version of docsify-cli found: $DOCSIFY_CLI_VERSION"
-            echo "version_updated=true" >> $GITHUB_ENV
-          fi
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: 🔑 Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: 🔐 Login to GitHub Container Registry
-        uses: docker/login-action@v3
+      - name: 🔐 Log in to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ secrets.GHCR_PAT }} # 默认权限不足
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 🏷️ Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
-            ${{ vars.DOCKERHUB_USERNAME }}/docsify-server
-            ghcr.io/${{ github.repository_owner }}/docsify-server
+            ${{ vars.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ env.docsify_cli_version }}
+            type=raw,value=${{ needs.check.outputs.version }}
             type=raw,value=latest
 
-      # Build and push Docker image to both Docker Hub and GHCR
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - name: 🛠️ Build and push Docker image
+        uses: docker/build-push-action@v7
         with:
+          context: .
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # 附带 SLSA 构建来源与 SBOM，供下游用 imagetools inspect 校验
+          provenance: mode=max
+          sbom: true
